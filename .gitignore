@@ -1,0 +1,31 @@
+# Rust target directory
+/target
+
+# Environment variable files
+.env
+
+# Optional cargo config files
+/Cargo.lock
+/Cargo.toml
+
+# Compiled binary files
+*.rs.bk
+
+# Backup files
+*~
+*.bak
+
+# Logs
+*.log
+
+# IDE files
+.idea/
+.vscode/
+
+# Others
+*.dSYM
+*.pdb
+*.so
+*.dll
+*.exe
+*.out
