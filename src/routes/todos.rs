@@ -10,13 +10,15 @@ use rocket::{State, Data};
 use rocket_multipart_form_data::{MultipartFormData, MultipartFormDataOptions, MultipartFormDataField, mime};
 use crate::types::common::{Todo, OptionalTodo};
 use crate::types::responses::{MessageOnlyResponse};
+use crate::guards::auth::AuthGuard;
 
 
 #[post("/upload", data = "<data>")]
 pub async fn upload_todo(
+    __auth: AuthGuard,
     content_type: &rocket::http::ContentType,
     data: Data<'_>,
-    pool: &State<PgPool>, 
+    pool: &State<PgPool>,
 ) -> Result<&'static str, &'static str> {
     let options = MultipartFormDataOptions::with_multipart_form_data_fields(vec![
         MultipartFormDataField::file("file").content_type_by_string(Some(mime::TEXT_PLAIN)).unwrap(),
@@ -31,7 +33,6 @@ pub async fn upload_todo(
 
     let mut description = String::new();
     if let Some(file_fields) = multipart_form_data.files.get("file") {
-
         let file_field = &file_fields[0];
 
         let mut file = File::open(&file_field.path).map_err(|_| "Failed to open file")?;
@@ -75,7 +76,11 @@ pub async fn upload_todo(
 }
 
 #[get("/save/<id>", format = "json")]
-pub async fn save_todo(id: i32, pool: &State<PgPool>) -> Result<Json<MessageOnlyResponse>, (Status, Json<MessageOnlyResponse>)> {
+pub async fn save_todo(
+    _auth: AuthGuard,
+    id: i32,
+    pool: &State<PgPool>,
+) -> Result<Json<MessageOnlyResponse>, (Status, Json<MessageOnlyResponse>)> {
     let todo = sqlx::query!(
         "SELECT title, description FROM todos WHERE id = $1",
         id
@@ -111,10 +116,10 @@ pub async fn save_todo(id: i32, pool: &State<PgPool>) -> Result<Json<MessageOnly
 
 #[post("/", format = "json", data = "<todo>")]
 pub async fn create_todo(
+    _auth: AuthGuard,
     todo: Json<Todo>,
     pool: &State<PgPool>,
 ) -> Result<Json<Todo>, String> {
-
     let new_todo = sqlx::query!(
         "INSERT INTO todos (user_id, title, description, completed) VALUES ($1, $2, $3, $4) RETURNING id",
         todo.user_id,
@@ -136,7 +141,11 @@ pub async fn create_todo(
 }
 
 #[get("/<id>", format = "json")]
-pub async fn get_todo(id: i32, pool: &State<PgPool>) -> Result<Json<Todo>, (Status, Json<MessageOnlyResponse>)> {
+pub async fn get_todo(
+    _auth: AuthGuard,
+    id: i32,
+    pool: &State<PgPool>,
+) -> Result<Json<Todo>, (Status, Json<MessageOnlyResponse>)> {
     let todo = sqlx::query!(
         "SELECT id, title, description, completed, user_id FROM todos WHERE id = $1",
         id
@@ -163,7 +172,11 @@ pub async fn get_todo(id: i32, pool: &State<PgPool>) -> Result<Json<Todo>, (Stat
 }
 
 #[delete("/<id>", format = "json")]
-pub async fn delete_todo(id: i32, pool: &State<PgPool>) -> Result<Json<MessageOnlyResponse>, (Status, Json<MessageOnlyResponse>)> {
+pub async fn delete_todo(
+    _auth: AuthGuard,
+    id: i32,
+    pool: &State<PgPool>,
+) -> Result<Json<MessageOnlyResponse>, (Status, Json<MessageOnlyResponse>)> {
     let result = sqlx::query!("DELETE FROM todos WHERE id = $1", id)
         .execute(pool.inner())
         .await;
@@ -173,7 +186,6 @@ pub async fn delete_todo(id: i32, pool: &State<PgPool>) -> Result<Json<MessageOn
             let rows_affected = query_result.rows_affected();
 
             if rows_affected > 0 {
-
                 Ok(Json(MessageOnlyResponse {
                     message: format!("Todo with id {} deleted successfully!", id),
                 }))
@@ -191,6 +203,7 @@ pub async fn delete_todo(id: i32, pool: &State<PgPool>) -> Result<Json<MessageOn
 
 #[patch("/<id>", format = "json", data = "<updated_todo>")]
 pub async fn update_todo(
+    _auth: AuthGuard,
     id: i32,
     updated_todo: Json<OptionalTodo>,
     pool: &State<PgPool>,
@@ -252,7 +265,7 @@ pub async fn update_todo(
 }
 
 #[get("/", format = "json")]
-pub async fn get_todos(pool: &State<PgPool>) -> Result<Json<Vec<Todo>>, String> {
+pub async fn get_todos(_auth: AuthGuard, pool: &State<PgPool>) -> Result<Json<Vec<Todo>>, String> {
     let todos = sqlx::query!(
         "SELECT id, title, description, completed, user_id FROM todos"
     )
