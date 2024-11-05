@@ -2,6 +2,7 @@ use sqlx::PgPool;
 use jsonwebtoken::{encode, Header, EncodingKey};
 use bcrypt::{hash, verify};
 use rocket::State;
+use rocket::http::Status;
 use rocket::serde::json::Json;
 use crate::environment::Env;
 use crate::utils::time::{get_current_timestamp};
@@ -12,35 +13,63 @@ use crate::types::responses::{LoginResponse, MessageOnlyResponse, Claims};
 
 
 #[post("/register", format = "json", data = "<user>")]
-pub async fn register(user: Json<User>, pool: &State<PgPool>) -> Json<MessageOnlyResponse> {
+pub async fn register(user: Json<User>, pool: &State<PgPool>) -> Result<Json<MessageOnlyResponse>, (Status, Json<MessageOnlyResponse>)> {
     if !is_email(&user.email) {
-        return Json(MessageOnlyResponse {
-            message: "Invalid email address!".to_string(),
-        });
+        return Err((
+            Status::BadRequest,
+            Json(MessageOnlyResponse {
+                message: "Invalid email address!".to_string(),
+            }),
+        ));
+    }
+
+    if let Ok(Some(_)) = sqlx::query!("SELECT id FROM users WHERE email = $1", user.email)
+        .fetch_optional(pool.inner())
+        .await
+    {
+        return Err((
+            Status::Conflict,
+            Json(MessageOnlyResponse {
+                message: "User with this email already exists!".to_string(),
+            }),
+        ));
     }
 
     let hashed_password = match hash(&user.password, BCRYPT_COST) {
         Ok(h) => h,
-        Err(_) => return Json(MessageOnlyResponse {
-            message: "Failed to hash password!".to_string(),
-        }),
+        Err(_) => {
+            return Err((
+                Status::InternalServerError,
+                Json(MessageOnlyResponse {
+                    message: "Failed to hash password!".to_string(),
+                }),
+            ));
+        }
     };
 
-    match sqlx::query!("INSERT INTO users (email, password) VALUES ($1, $2)", user.email, hashed_password)
+    let result = sqlx::query!(
+        "INSERT INTO users (email, password) VALUES ($1, $2)",
+        user.email,
+        hashed_password
+    )
         .execute(pool.inner())
-        .await
-    {
-        Ok(_) => Json(MessageOnlyResponse {
-            message: format!("User {} registered successfully!", user.email),
-        }),
-        Err(_) => Json(MessageOnlyResponse {
-            message: "User with this email already exists!".to_string(),
-        }),
+        .await;
+
+    match result {
+        Ok(_) => Ok(Json(MessageOnlyResponse {
+            message: "User registered successfully!".to_string(),
+        })),
+        Err(_) => Err((
+            Status::InternalServerError,
+            Json(MessageOnlyResponse {
+                message: "Failed to register user!".to_string(),
+            }),
+        )),
     }
 }
 
 #[post("/login", format = "json", data = "<user>")]
-pub async fn login(user: Json<User>, pool: &State<PgPool>) -> Json<LoginResponse> {
+pub async fn login(user: Json<User>, pool: &State<PgPool>) -> Result<Json<LoginResponse>, (Status, Json<LoginResponse>)> {
     match sqlx::query!("SELECT id, password FROM users WHERE email = $1", user.email)
         .fetch_one(pool.inner())
         .await
@@ -56,21 +85,31 @@ pub async fn login(user: Json<User>, pool: &State<PgPool>) -> Json<LoginResponse
                     let jwt_secret = Env::jwt_secret();
                     let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).unwrap();
 
-                    Json(LoginResponse {
+                    Ok(Json(LoginResponse {
                         message: format!("User {} logged in successfully!", user.email),
                         token: Some(token),
-                    })
+                    }))
                 }
-                _ => Json(LoginResponse {
+                _ => {
+                    Err((
+                        Status::Unauthorized,
+                        Json(LoginResponse {
+                            message: "Invalid email or password!".to_string(),
+                            token: None,
+                        }),
+                    ))
+                }
+            }
+        },
+        Err(_) => {
+            Err((
+                Status::Unauthorized,
+                Json(LoginResponse {
                     message: "Invalid email or password!".to_string(),
                     token: None,
                 }),
-            }
+            ))
         },
-        Err(_) => Json(LoginResponse {
-            message: "Invalid email or password!".to_string(),
-            token: None,
-        }),
     }
 }
 
